@@ -390,20 +390,21 @@ def calc_scale_brackets(offset=1., limit=math.pi):
         yield disc_merc
         i += 1
 
-def zoom_adjust(scale_brackets, zoom, y):
-    """calculate the zoom level difference, for the given y-tile and zoom level,
-    that gives the same effective scale as at the equator"""
-    # consider closest point on tile to equator (least distortion -- err on
-    # side of higher resolution)
+def ref_mercy(zoom, y):
     if zoom == 0:
         yr = 0.5
     else:
         yr = y
         if y < 2**(zoom - 1):
             yr += 1
+    return abs(xy_to_mercator(tilef_to_xy((0., yr), zoom))[1])
 
-    merc_y = abs(xy_to_mercator(tilef_to_xy((0., yr), zoom))[1])
-    return bisect.bisect_right(scale_brackets, merc_y)
+def zoom_adjust(scale_brackets, zoom, y):
+    """calculate the zoom level difference, for the given y-tile and zoom level,
+    that gives the same effective scale as at the equator"""
+    # consider closest point on tile to equator (least distortion -- err on
+    # side of higher resolution)
+    return bisect.bisect_right(scale_brackets, ref_mercy(zoom, y))
 
 def max_y_for_zoom(scale_brackets, zoom, max_zoom):
     """return the minimum and maximum y-tiles at the given zoom level for which the

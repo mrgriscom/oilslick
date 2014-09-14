@@ -20,10 +20,14 @@ def render_all(resolution):
     fz = math.log(2*math.pi*EARTH_MEAN_RAD / TILE_SIZE / resolution, 2)
     zmax = math.ceil(fz)
     brackets = list(mt.calc_scale_brackets(fz % 1.))
-    def max_z(z, y):
-        return zmax - mt.zoom_adjust(brackets, z, y)
+    def max_z(z, y, exact=False):
+        if not exact:
+            return zmax - mt.zoom_adjust(brackets, z, y)
+        else:
+            lat = mt.mercator_to_ll((0, mt.ref_mercy(z, y)))[0]
+            return fz + math.log(math.cos(math.radians(lat)), 2)
 
-    root = mt.Tile(layer='oilslick', z=5, x=0, y=7) #z=4, x=3, y=5) #0, x=0, y=0)
+    root = mt.Tile(layer='oilslick', z=0, x=0, y=0)
     render_tile(root, max_z)
     postprocess_tile(root, max_z)
 
@@ -45,13 +49,21 @@ def render_tile(tile, max_z, z_extracted=None):
 def postprocess_tile(tile, max_z):
     path = tmptile(tile)
     if tile.z <= max_z(tile.z, tile.y):
-        os.popen('convert %s %s' % (path, path[:-4] + 'png'))
-        #up to z+.25: q92
-        #thereafter, linear scale to q75
-        # convert jpg
+        os.popen('convert %s %s' % (path, '/tmp/tile.png'))
+
+        overzoom = tile.z - max_z(tile.z, tile.y, True)
+        OVZ0, OVZ1 = .3, 1.
+        Q0, Q1 = 92, 70
+        if overzoom < OVZ0:
+            quality = Q0
+        else:
+            quality = (overzoom - OVZ0) / (OVZ1 - OVZ0) * (Q1 - Q0) + Q0
+        os.popen('convert -quality %d %s %s' % (int(round(quality)), path, '/tmp/tile.jpg'))
+
         # dedup and index in db
-        pass
-    os.remove(tmptile(tile))
+        shutil.move('/tmp/tile.png', path[:-4] + 'png')
+        shutil.move('/tmp/tile.jpg', path[:-4] + 'jpg')
+    os.remove(path)
 
 def tmptile(tile):
     return '/tmp/rawtile_%d_%d_%d.tiff' % (tile.z, tile.x, tile.y)
@@ -108,5 +120,5 @@ def render_parent(tile):
     childpaths = [tmptile(child) for child in children(tile)]
     os.popen('montage -mode Concatenate -tile 2x2 %s tif:- | convert -filter Box -geometry 50%% tif:- %s' % (' '.join(childpaths), tmptile(tile)))
 
-
-render_all(2*math.pi*EARTH_MEAN_RAD / 360. / 1200.)
+if __name__ == "__main__":
+    render_all(2*math.pi*EARTH_MEAN_RAD / 360. / 1200.)
