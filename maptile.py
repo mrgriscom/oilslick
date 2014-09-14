@@ -9,6 +9,7 @@ from StringIO import StringIO
 from contextlib import closing
 import Image
 import collections
+import shutil
 try:
     import mapdownload # argh circular import
     import geodesy
@@ -63,6 +64,10 @@ class Tile(Base):
         """
         self.uuid = hashfunc(data)
         self._data(data, file_type).save(sess)
+
+    def savefile(self, path, file_type):
+        self.uuid = os.popen('convert %s rgb:- | sha1sum' % path).readlines()[0].split()[0]
+        return TileData(uuid=self.uuid, file_type=file_type).move_file(path)
 
     def is_null(self):
         return self.uuid == mapdownload.null_digest()
@@ -170,6 +175,15 @@ class TileData(Base):
             with open(path, 'w') as f:
                 f.write(self.data)
 
+    def move_file(self, origpath):
+        for ipath in self.path_intermediary():
+            if not os.path.exists(ipath):
+                os.mkdir(ipath)
+                
+        path = self.path()
+        if not os.path.exists(path):
+            shutil.move(origpath, path)
+
     def remove(self, sess=None):
         """remove tile data from all sources"""
         if sess:
@@ -224,93 +238,7 @@ def _getdata(from_file, from_db):
     else:
         return from_file() or from_db()
 
-class Region(Base):
-    """named regions / tile download areas"""
 
-    GLOBAL_NAME = 'world'
-
-    __tablename__ = 'regions'
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False, unique=True)
-    boundary = Column(String, nullable=False)
-
-    def __init__(self, name, coords):
-        """
-        coords -- a list of lat/lon coordinates ([(lat0, lon0), (lat1, lon1), ...]),
-          or a string like 'lat0,lon0 lat1,lon1 ...'. lon must be bounded [-180,180]
-        """
-        if hasattr(coords, '__iter__'):
-            coords = ' '.join('%s,%s' % c for c in coords)
-
-        super(Region, self).__init__(**{
-            'name': name,
-            'boundary': coords,
-        })
-
-        self.validate()
-
-    def coords(self):
-        """coordinate list from db string representation"""
-        return [tuple(float(k) for k in c.split(',')) for c in self.boundary.split()]
-
-    def validate(self):
-        coords = self.coords()
-        if len(coords) < 3:
-            raise Exception('not enough points')
-        for lat, lon in coords:
-            if lat > 90. or lat < -90. or lon < -180. or lon > 180.:
-                raise Exception('coordinates out of range')
-
-    def poly(self):
-        """generate a polygon for the region, in lat/lon coordinates, taking
-        care of wrapping around the IDL"""
-        # correct coords so each lon is within 180 deg (in absolute
-        # terms) of the previous. this essentially 'unrolls' any overlap
-        # with the IDL by letting lon go beyond [-180,180]
-        def relative_adjust(coords):
-            ref_lon = 0.
-            for lat, lon in coords:
-                adj_lon = geodesy.anglenorm(lon, 180. - ref_lon)
-                yield (lat, adj_lon)
-                ref_lon = adj_lon
-        coords = list(relative_adjust(self.coords()))
-        min_lon = min(c[1] for c in coords)
-        max_lon = max(c[1] for c in coords)
-
-        # for each wraparound (360-degree width) segment of unrolled
-        # poly, cut out that segment and shift back to normal lon range
-        unrolled = Polygon(coords)
-        def poly_segment(edge):
-            # clip lat to prevent discontinuity when converting to mercator
-            world = quadrant(-89.999, 89.999, edge, edge + 360.)
-            overlap = world & unrolled
-            overlap.shift(0, -180. - edge)
-            return overlap
-        def lonrange():
-            k = ((min_lon + 180.) // 360. - .5) * 360.
-            while k < max_lon:
-                yield k
-                k += 360.
-        return reduce(lambda a, b: a | b, (poly_segment(edge) for edge in lonrange()))
-
-    def merc_poly(self):
-        """like poly(), but transformed to mercator coordinates"""
-        p = self.poly()
-        mp = Polygon()
-        for i, c in enumerate(p):
-            mp.addContour(ll_to_xy(c), p.isHole(i))
-        return mp
-
-    @staticmethod
-    def world():
-        """region covering entire world"""
-        return Region(Region.GLOBAL_NAME, [
-                # delta-lons must be < 180
-                ( 90, -180), ( 90, -60), ( 90,  60), ( 90,  180),
-                (-90,  180), (-90,  60), (-90, -60), (-90, -180), 
-            ])
-    
 def ll_to_xy(coords):
     return [mercator_to_xy(ll_to_mercator(c)) for c in coords]
 
@@ -332,9 +260,9 @@ def dbsess(connector=settings.TILE_DB, echo=False):
     sess = sessionmaker(bind=engine)()
 
     # initialize 'global' region
-    if not sess.query(Region).filter_by(name=Region.GLOBAL_NAME).count():
-        sess.add(Region.world())
-        sess.commit()
+    #if not sess.query(Region).filter_by(name=Region.GLOBAL_NAME).count():
+    #    sess.add(Region.world())
+    #    sess.commit()
 
     return sess
 

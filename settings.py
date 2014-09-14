@@ -5,14 +5,14 @@ import logging.handlers
 ### DATABASES AND DIRECTORIES
 
 # database connector for tile info
-TILE_DB = 'postgresql:///tiles'
+TILE_DB = 'postgresql:///tilelayers'
 
 # if true, store tile images in database as BLOBs
 # if false, store as files in TILE_ROOT
 TILE_STORE_BLOB = False
 
 # root directory where tiles are stored
-TILE_ROOT = '~/.birdseye/tiles'
+TILE_ROOT = '~/tmp/tiles/oilslick'
 # how to clump tiles into directory buckets (shouldn't have too many
 # entries in any one directory)
 # [2, 4]: 53392f0a.jpg => 53/5339/53392f0a.jpg

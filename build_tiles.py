@@ -2,6 +2,8 @@ import maptile as mt
 import math
 import os
 import shutil
+import hashlib
+import settings
 
 EARTH_MEAN_RAD = 6371009.
 EARTH_EQ_RAD = 6378137.
@@ -14,7 +16,7 @@ CHUNK_FRINGE = 4 # px
 
 def children(tile):
     for ch in mt.quad_children(tile.x, tile.y):
-        yield mt.Tile(layer=tile.layer, z=tile.z + 1, x=ch[0], y=ch[1])
+        yield mt.Tile(z=tile.z + 1, x=ch[0], y=ch[1])
 
 def render_all(resolution):
     fz = math.log(2*math.pi*EARTH_MEAN_RAD / TILE_SIZE / resolution, 2)
@@ -27,9 +29,15 @@ def render_all(resolution):
             lat = mt.mercator_to_ll((0, mt.ref_mercy(z, y)))[0]
             return fz + math.log(math.cos(math.radians(lat)), 2)
 
-    root = mt.Tile(layer='oilslick', z=0, x=0, y=0)
+    root = mt.Tile(z=0, x=0, y=0)
     render_tile(root, max_z)
     postprocess_tile(root, max_z)
+
+def pct_complete(qt):
+    pct = 1.
+    for c in reversed(qt):
+        pct = (pct + int(c)) / 4.
+    return pct
 
 def render_tile(tile, max_z, z_extracted=None):
     if z_extracted is None:
@@ -44,7 +52,7 @@ def render_tile(tile, max_z, z_extracted=None):
         for child in children(tile):
             postprocess_tile(child, max_z)
 
-    print 'rendered %d %d %d' % (tile.z, tile.x, tile.y)
+    print 'rendered %d %d %d [%s] (%.4f%%)' % (tile.z, tile.x, tile.y, tile.qt, 100.*pct_complete(tile.qt))
 
 def postprocess_tile(tile, max_z):
     path = tmptile(tile)
@@ -52,6 +60,7 @@ def postprocess_tile(tile, max_z):
         os.popen('convert %s %s' % (path, '/tmp/tile.png'))
 
         overzoom = tile.z - max_z(tile.z, tile.y, True)
+        assert overzoom < 1. + 1e-6
         OVZ0, OVZ1 = .3, 1.
         Q0, Q1 = 92, 70
         if overzoom < OVZ0:
@@ -60,10 +69,33 @@ def postprocess_tile(tile, max_z):
             quality = (overzoom - OVZ0) / (OVZ1 - OVZ0) * (Q1 - Q0) + Q0
         os.popen('convert -quality %d %s %s' % (int(round(quality)), path, '/tmp/tile.jpg'))
 
-        # dedup and index in db
-        shutil.move('/tmp/tile.png', path[:-4] + 'png')
-        shutil.move('/tmp/tile.jpg', path[:-4] + 'jpg')
+        DEDUP = True
+        if DEDUP:
+            def clone_tile(layer):
+                return mt.Tile(layer=layer, z=tile.z, x=tile.x, y=tile.y)
+            lossless = clone_tile('oilslick-ref')
+            lossy = clone_tile('oilslick')
+            lossless.savefile('/tmp/tile.png', 'png')
+            lossy.savefile('/tmp/tile.jpg', 'jpg')
+            SESS.add(lossless)
+            SESS.add(lossy)
+            commit()
+        else:
+            n = int(math.ceil(tile.z * math.log(2, 10)))
+            frag = '%02d_%0*d_%0*d' % (tile.z, n, tile.x, n, tile.y)
+            def dstpath(ext):
+                return os.path.join(os.path.expanduser(settings.TILE_ROOT), 'oilslick_%s.%s' % (frag, ext))
+            shutil.move('/tmp/tile.png', dstpath('png'))
+            shutil.move('/tmp/tile.jpg', dstpath('jpg'))
+
     os.remove(path)
+
+def commit():
+    global COUNT
+    COMMIT_INTERVAL = 100
+    COUNT += 1
+    if COUNT % COMMIT_INTERVAL == 0:
+        SESS.commit()
 
 def tmptile(tile):
     return '/tmp/rawtile_%d_%d_%d.tiff' % (tile.z, tile.x, tile.y)
@@ -121,4 +153,7 @@ def render_parent(tile):
     os.popen('montage -mode Concatenate -tile 2x2 %s tif:- | convert -filter Box -geometry 50%% tif:- %s' % (' '.join(childpaths), tmptile(tile)))
 
 if __name__ == "__main__":
+    COUNT = 0
+    SESS = mt.dbsess()
     render_all(2*math.pi*EARTH_MEAN_RAD / 360. / 1200.)
+    SESS.commit()
