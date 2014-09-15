@@ -69,8 +69,9 @@ def postprocess_tile(tile, max_z):
             quality = (overzoom - OVZ0) / (OVZ1 - OVZ0) * (Q1 - Q0) + Q0
         os.popen('convert -quality %d %s %s' % (int(round(quality)), path, '/tmp/tile.jpg'))
 
-        DEDUP = True
+        DEDUP = False
         if DEDUP:
+            # really slow!
             def clone_tile(layer):
                 return mt.Tile(layer=layer, z=tile.z, x=tile.x, y=tile.y)
             lossless = clone_tile('oilslick-ref')
@@ -81,12 +82,20 @@ def postprocess_tile(tile, max_z):
             SESS.add(lossy)
             commit()
         else:
-            n = int(math.ceil(tile.z * math.log(2, 10)))
-            frag = '%02d_%0*d_%0*d' % (tile.z, n, tile.x, n, tile.y)
+            #n = int(math.ceil(tile.z * math.log(2, 10)))
+            #frag = '%02d_%0*d_%0*d' % (tile.z, n, tile.x, n, tile.y)
             def dstpath(ext):
-                return os.path.join(os.path.expanduser(settings.TILE_ROOT), 'oilslick_%s.%s' % (frag, ext))
-            shutil.move('/tmp/tile.png', dstpath('png'))
-            shutil.move('/tmp/tile.jpg', dstpath('jpg'))
+                #return os.path.join(os.path.expanduser(settings.TILE_ROOT), 'oilslick_%s.%s' % (frag, ext))
+                return [os.path.expanduser(settings.TILE_ROOT), 'z%d' % tile.z, str(tile.x), '%d%s' % (tile.y, ext)]
+            def move(src):
+                dst = dstpath(os.path.splitext(src)[1])
+                for i in xrange(1, len(dst) - 1):
+                    interim = os.path.join(*dst[:i+1])
+                    if not os.path.exists(interim):
+                        os.mkdir(interim)
+                shutil.move(src, os.path.join(*dst))
+            move('/tmp/tile.png')
+            move('/tmp/tile.jpg')
 
     os.remove(path)
 
