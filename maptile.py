@@ -114,6 +114,10 @@ class Tile(Base):
         ancestors = collections.defaultdict(lambda: None, ((t.z, t) for t in q))
         return [ancestors[self.z - i] for i in range(lookback + 1)]
 
+    def extent(self):
+        dim = 2.**self.z
+        return quadrant(self.x / dim, (self.x + 1) / dim, self.y / dim, (self.y + 1) / dim)
+
     # TODO not passing 'sess' causes error on 'null' tiles
     # should i assume we should never call these funcs on tiles we don't expect data to exist for?
     # ie, if no data for tile, we must show the 'broken' tile?

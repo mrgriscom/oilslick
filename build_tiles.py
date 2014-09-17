@@ -4,6 +4,7 @@ import os
 import shutil
 import hashlib
 import settings
+from Polygon import *
 
 EARTH_MEAN_RAD = 6371009.
 EARTH_EQ_RAD = 6378137.
@@ -20,7 +21,7 @@ def children(tile):
     for ch in mt.quad_children(tile.x, tile.y):
         yield mt.Tile(z=tile.z + 1, x=ch[0], y=ch[1])
 
-def render_all(resolution):
+def render_all(resolution, bound):
     fz = math.log(2*math.pi*EARTH_MEAN_RAD / TILE_SIZE / resolution, 2)
     zmax = math.ceil(fz)
     brackets = list(mt.calc_scale_brackets(fz % 1.))
@@ -32,8 +33,8 @@ def render_all(resolution):
             return fz + math.log(math.cos(math.radians(lat)), 2)
 
     root = mt.Tile(z=0, x=0, y=0)
-    render_tile(root, max_z)
-    postprocess_tile(root, max_z)
+    render_tile(bound, root, max_z)
+    postprocess_tile(bound, root, max_z)
 
 def pct_complete(qt):
     pct = 1.
@@ -41,12 +42,27 @@ def pct_complete(qt):
         pct = (pct + int(c)) / 4.
     return pct
 
-def render_tile(tile, max_z, z_extracted=None):
-    if os.path.exists(tmptile(tile)):
+def subset_bound(bound, tile):
+    if bound is None or bound is True:
+        return bound
+    tilebound = tile.extent()
+    if not bound.overlaps(tilebound):
+        return None
+    elif bound.covers(tilebound):
+        return True
+    else:
+        return bound & tilebound
+
+def render_tile(bound, tile, max_z, z_extracted=None):
+    bound = subset_bound(bound, tile)
+    if bound is None:
+        return
+
+    if RESUME and os.path.exists(tmptile(tile)):
         print 'already rendered %d %d %d [%s]' % (tile.z, tile.x, tile.y, tile.qt)
         if z_extracted is None or tile.z < z_extracted:
             for child in children(tile):
-                postprocess_tile(child, max_z)
+                postprocess_tile(bound, child, max_z)
         return
 
     if z_extracted is None:
@@ -56,10 +72,10 @@ def render_tile(tile, max_z, z_extracted=None):
 
     if z_extracted is None or tile.z < z_extracted:
         for child in children(tile):
-            render_tile(child, max_z, z_extracted)
+            render_tile(bound, child, max_z, z_extracted)
         render_parent(tile)
         for child in children(tile):
-            postprocess_tile(child, max_z)
+            postprocess_tile(bound, child, max_z)
 
     print 'rendered %d %d %d [%s] (%.4f%%)' % (tile.z, tile.x, tile.y, tile.qt, 100.*pct_complete(tile.qt))
 
@@ -71,8 +87,12 @@ def dstpath(tile, ext):
         root += '-ref'
     return [os.path.expanduser(root), 'z%d' % tile.z, str(tile.x), '%d%s' % (tile.y, ext)]
 
-def postprocess_tile(tile, max_z):
-    if all(os.path.exists(os.path.join(*dstpath(tile, ext))) for ext in ('.png', '.jpg')):
+def postprocess_tile(bound, tile, max_z):
+    bound = subset_bound(bound, tile)
+    if bound is None:
+        return
+
+    if RESUME and all(os.path.exists(os.path.join(*dstpath(tile, ext))) for ext in ('.png', '.jpg')):
         print 'already post-processed %d %d %d [%s]' % (tile.z, tile.x, tile.y, tile.qt)
         return
 
@@ -178,11 +198,25 @@ def extract(tile, zmax):
     return z
 
 def render_parent(tile):
-    childpaths = [tmptile(child) for child in children(tile)]
+    def _path(child):
+        p = tmptile(child)
+        if not os.path.exists(p):
+            p = os.path.join(*dstpath(child, '.png'))
+        return p
+    childpaths = [_path(child) for child in children(tile)]
     os.popen('montage -mode Concatenate -tile 2x2 %s tif:- | convert -filter Box -geometry 50%% tif:- %s' % (' '.join(childpaths), tmptile(tile)))
 
+RESUME = False
+
 if __name__ == "__main__":
+
+    #boundary = mt.quadrant(-26.2, -25.9, 149.3, 149.9)[0]
+    #boundary = mt.quadrant(-86, 86, 179.9, 180)[0]
+    boundary = mt.quadrant(-86, 86, -180, -179.9)[0]
+
+    bound = Polygon([mt.mercator_to_xy(mt.ll_to_mercator(p)) for p in boundary])
+
     COUNT = 0
     SESS = mt.dbsess()
-    render_all(2*math.pi*EARTH_MEAN_RAD / 360. / 1200.)
+    render_all(2*math.pi*EARTH_MEAN_RAD / 360. / 1200., bound)
     SESS.commit()
