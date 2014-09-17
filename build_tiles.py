@@ -40,6 +40,13 @@ def pct_complete(qt):
     return pct
 
 def render_tile(tile, max_z, z_extracted=None):
+    if os.path.exists(tmptile(tile)):
+        print 'already rendered %d %d %d [%s]' % (tile.z, tile.x, tile.y, tile.qt)
+        if z_extracted is None or tile.z < z_extracted:
+            for child in children(tile):
+                postprocess_tile(child, max_z)
+        return
+
     if z_extracted is None:
         zmax = max_z(tile.z, tile.y)
         if zmax - tile.z <= CHUNK_DEPTH:
@@ -54,7 +61,15 @@ def render_tile(tile, max_z, z_extracted=None):
 
     print 'rendered %d %d %d [%s] (%.4f%%)' % (tile.z, tile.x, tile.y, tile.qt, 100.*pct_complete(tile.qt))
 
+def dstpath(tile, ext):
+    #return os.path.join(os.path.expanduser(settings.TILE_ROOT), 'oilslick_%s.%s' % (frag, ext))
+    return [os.path.expanduser(settings.TILE_ROOT), 'z%d' % tile.z, str(tile.x), '%d%s' % (tile.y, ext)]
+
 def postprocess_tile(tile, max_z):
+    if all(os.path.exists(os.path.join(*dstpath(tile, ext))) for ext in ('.png', '.jpg')):
+        print 'already post-processed %d %d %d [%s]' % (tile.z, tile.x, tile.y, tile.qt)
+        return
+
     path = tmptile(tile)
     if tile.z <= max_z(tile.z, tile.y):
         os.popen('convert %s %s' % (path, '/tmp/tile.png'))
@@ -84,11 +99,8 @@ def postprocess_tile(tile, max_z):
         else:
             #n = int(math.ceil(tile.z * math.log(2, 10)))
             #frag = '%02d_%0*d_%0*d' % (tile.z, n, tile.x, n, tile.y)
-            def dstpath(ext):
-                #return os.path.join(os.path.expanduser(settings.TILE_ROOT), 'oilslick_%s.%s' % (frag, ext))
-                return [os.path.expanduser(settings.TILE_ROOT), 'z%d' % tile.z, str(tile.x), '%d%s' % (tile.y, ext)]
             def move(src):
-                dst = dstpath(os.path.splitext(src)[1])
+                dst = dstpath(tile, os.path.splitext(src)[1])
                 for i in xrange(1, len(dst) - 1):
                     interim = os.path.join(*dst[:i+1])
                     if not os.path.exists(interim):
@@ -120,7 +132,7 @@ def extract(tile, zmax):
     # is we lose cubic resampling on the very edge pixel
     fringe_left = CHUNK_FRINGE if tile.x > 0 else -.01
     fringe_right = CHUNK_FRINGE if tile.x < 2**tile.z - 1 else -.01
-    width = int(round(inner_width + fringe_left + fringe_right))
+    width = inner_width + fringe_left + fringe_right
     height = inner_width + 2 * CHUNK_FRINGE
 
     res = 2*math.pi*EARTH_EQ_RAD / TILE_SIZE / 2**z
@@ -135,7 +147,7 @@ def extract(tile, zmax):
             'ymin': p0[1] - res * CHUNK_FRINGE,
             'xmax': p0[0] + res * (width - fringe_left),
             'ymax': p0[1] + res * (height - CHUNK_FRINGE),
-            'dem': '/tmp/e/test.vrt',
+            'dem': '/home/drew/dev/oilslick/test.vrt',
             'chunk_dem': CHUNK_DEM,
         })
     os.popen('gdaldem color-relief %s ~/tmp/demlegend %s' % (CHUNK_DEM, CHUNK_COLOR))
