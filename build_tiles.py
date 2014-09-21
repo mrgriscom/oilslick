@@ -85,7 +85,7 @@ def dstpath(tile, ext):
     assert not root.endswith('/')
     if ext == '.png':
         root += '-ref'
-    return [os.path.expanduser(root), 'z%d' % tile.z, str(tile.x), '%d%s' % (tile.y, ext)]
+    return [os.path.expanduser(root), str(tile.z), str(tile.x), '%d%s' % (tile.y, ext)]
 
 def postprocess_tile(bound, tile, max_z):
     bound = subset_bound(bound, tile)
